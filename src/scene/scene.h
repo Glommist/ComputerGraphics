@@ -140,5 +140,4 @@ private:
     /*! \~chinese 日志记录器。 */
     std::shared_ptr<spdlog::logger> logger;
 };
-
 #endif // DANDELION_SCENE_SCENE_H

@@ -18,6 +18,7 @@
 using Eigen::Matrix4f;
 using Eigen::Quaternionf;
 using Eigen::Vector3f;
+using Eigen::Vector4f;
 using std::array;
 using std::make_unique;
 using std::optional;
@@ -57,25 +58,26 @@ Matrix4f Object::model()
     ScalingMatrix(1, 1) = scaling(1);
     ScalingMatrix(2, 2) = scaling(2);
 
-    auto [A, B, C] = quaternion_to_ZYX_euler(rotation.w(), rotation.x(), rotation.y(), rotation.z());
+    auto [A, B, C] =
+        quaternion_to_ZYX_euler(rotation.w(), rotation.x(), rotation.y(), rotation.z());
 
-    double A1 = radians(A);
-    double B1 = radians(B);
-    double C1 = radians(C);
-    RotationMatrix_x(1, 1) = cos(A1);
-    RotationMatrix_x(1, 2) = -sin(A1);
-    RotationMatrix_x(2, 1) = sin(A1);
-    RotationMatrix_x(2, 2) = cos(A1);
+    double A1              = radians(A);
+    double B1              = radians(B);
+    double C1              = radians(C);
+    RotationMatrix_x(1, 1) = (float)cos(A1);
+    RotationMatrix_x(1, 2) = (float)-sin(A1);
+    RotationMatrix_x(2, 1) = (float)sin(A1);
+    RotationMatrix_x(2, 2) = (float)cos(A1);
 
-    RotationMatrix_y(0, 0) = cos(B1);
-    RotationMatrix_y(0, 2) = sin(B1);
-    RotationMatrix_y(2, 0) = -sin(B1);
-    RotationMatrix_y(2, 2) = cos(B1);
+    RotationMatrix_y(0, 0) = (float)cos(B1);
+    RotationMatrix_y(0, 2) = (float)sin(B1);
+    RotationMatrix_y(2, 0) = (float)-sin(B1);
+    RotationMatrix_y(2, 2) = (float)cos(B1);
 
-    RotationMatrix_z(0, 0) = cos(C1);
-    RotationMatrix_z(0, 1) = -sin(C1);
-    RotationMatrix_z(1, 0) = sin(C1);
-    RotationMatrix_z(1, 1) = cos(C1);
+    RotationMatrix_z(0, 0) = (float)cos(C1);
+    RotationMatrix_z(0, 1) = (float)-sin(C1);
+    RotationMatrix_z(1, 0) = (float)sin(C1);
+    RotationMatrix_z(1, 1) = (float)cos(C1);
 
     RotationMatrix = RotationMatrix_x * RotationMatrix_y * RotationMatrix_z;
 
@@ -87,26 +89,47 @@ Matrix4f Object::model()
     return ModelMatrix;
 }
 
-
 void Object::update(vector<Object*>& all_objects)
 {
     // 首先调用 step 函数计下一步该物体的运动学状态。
     KineticState current_state{center, velocity, force / mass};
     KineticState next_state = step(prev_state, current_state);
-    (void)next_state;
+    //(void)next_state;
     // 将物体的位置移动到下一步状态处，但暂时不要修改物体的速度。
+    //std::cout << "Object::update" << std::endl;
+    center = next_state.position;
+    Matrix4f model_matrix = Object::model();
     // 遍历 all_objects，检查该物体在下一步状态的位置处是否会与其他物体发生碰撞。
-    for (auto object : all_objects) {
-        (void)object;
-
-        // 检测该物体与另一物体是否碰撞的方法是：
-        // 遍历该物体的每一条边，构造与边重合的射线去和另一物体求交，如果求交结果非空、
-        // 相交处也在这条边的两个端点之间，那么该物体与另一物体发生碰撞。
-        // 请时刻注意：物体 mesh 顶点的坐标都在模型坐标系下，你需要先将其变换到世界坐标系。
+    for (auto object : all_objects) 
+    {
+        //在此过程中，ray来自于待检测的运动的问题，mesh来自于其他物体。
+         /*检测该物体与另一物体是否碰撞的方法是：
+         遍历该物体的每一条边，构造与边重合的射线去和另一物体求交，如果求交结果非空、
+         相交处也在这条边的两个端点之间，那么该物体与另一物体发生碰撞。
+         请时刻注意：物体 mesh 顶点的坐标都在模型坐标系下，你需要先将其变换到世界坐标系。*/
+        if (object->id == id)
+            continue;
         for (size_t i = 0; i < mesh.edges.count(); ++i) {
             array<size_t, 2> v_indices = mesh.edge(i);
-            (void)v_indices;
-            // v_indices 中是这条边两个端点的索引，以这两个索引为参数调用 GL::Mesh::vertex
+            Vector3f x0_model          = mesh.vertex(v_indices[0]);
+            Vector3f x1_model          = mesh.vertex(v_indices[1]);
+            Vector4f x0_world;
+            x0_world[0] = x0_model[0];
+            x0_world[1] = x0_model[1];
+            x0_world[2] = x0_model[2];
+            x0_world[3] = 1.0f;
+            x0_world    = model_matrix * x0_world;
+            Vector4f x1_world;
+            x1_world[0] = x1_model[0];
+            x1_world[1] = x1_model[1];
+            x1_world[2] = x1_model[2];
+            x1_world[3] = 1.0f;
+            x1_world    = model_matrix * x1_world;
+            Ray ray;
+            ray.direction = (x1_world.head<3>() - x0_world.head<3>()).normalized();
+            ray.origin    = x0_world.head<3>();
+            // edge(i)读取编号为index的边，edge类型为ElementArrayBuffer，定义与gl.h中
+            //  v_indices 中是这条边两个端点的索引，以这两个索引为参数调用 GL::Mesh::vertex
             // 方法可以获得它们的坐标，进而用于构造射线。
             if (BVH_for_collision) {
             } else {
@@ -114,9 +137,33 @@ void Object::update(vector<Object*>& all_objects)
             // 根据求交结果，判断该物体与另一物体是否发生了碰撞。
             // 如果发生碰撞，按动量定理计算两个物体碰撞后的速度，并将下一步状态的位置设为
             // current_state.position ，以避免重复碰撞。
+            Intersection result;
+            Matrix4f model    = object->model();
+            auto intersection = naive_intersect(ray, object->mesh, model);
+            if (intersection.has_value()) 
+            {
+                result            = intersection.value();
+                float edge_length = (x1_world.head<3>() - x0_world.head<3>()).norm();
+                if (abs(result.t) < edge_length) 
+                {
+                    Vector3f v_rel    = object->velocity - velocity;
+                    Vector3f n        = result.normal.normalized();
+                    float v_rel_dot_n = v_rel.dot(n);
+                    float jr = 2 * v_rel_dot_n / (1.0f / mass + 1.0f / object->mass);
+                    velocity += (jr / mass) * n;
+                    object->velocity -= (jr / object->mass) * n;
+                    next_state.velocity = velocity;
+                    center = prev_state.position;
+                    break;
+                }
+            }
+
         }
     }
     // 将上一步状态赋值为当前状态，并将物体更新到下一步状态。
+    prev_state    = current_state;
+    //center     = next_state.position;
+    velocity      = next_state.velocity;
 }
 
 void Object::render(const Shader& shader, WorkingMode mode, bool selected)

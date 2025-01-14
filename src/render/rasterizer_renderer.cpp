@@ -1,17 +1,24 @@
-#include <algorithm>
-#include <fstream>
+#include <cstddef>
 #include <memory>
 #include <vector>
 #include <thread>
 #include <chrono>
-
+#include <future>
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+
 
 #include "render_engine.h"
 #include "../scene/light.h"
 #include "../utils/logger.h"
+//调试过程加入的头文件，记得delete
+//begin:
+//#include <ctime>
+#include <iostream>
 
+int mycount=0;
+//:end
+using std::size_t;
 using std::chrono::steady_clock;
 using duration   = std::chrono::duration<float>;
 using time_point = std::chrono::time_point<steady_clock, duration>;
@@ -98,8 +105,8 @@ void RasterizerRenderer::render(const Scene& scene)
             // set Uniforms for vertex shader
             Uniforms::MVP         = cam.projection() * cam.view() * object->model();
             Uniforms::inv_trans_M = object->model().inverse().transpose();
-            Uniforms::width       = this->width;
-            Uniforms::height      = this->height;
+            Uniforms::width       = static_cast<int>(this->width);
+            Uniforms::height      = static_cast<int>(this->height);
             // To do: 同步
             Uniforms::material = object->mesh.material;
             Uniforms::lights   = scene.lights;
@@ -109,12 +116,12 @@ void RasterizerRenderer::render(const Scene& scene)
             const std::vector<float>& vertices     = object->mesh.vertices.data;
             const std::vector<unsigned int>& faces = object->mesh.faces.data;
             const std::vector<float>& normals      = object->mesh.normals.data;
-            unsigned int num_faces                 = faces.size();
+            size_t num_faces                       = faces.size();
 
             // process vertices
-            for (unsigned int i = 0; i < num_faces; i += 3) {
-                for (unsigned int j = 0; j < 3; j++) {
-                    unsigned int idx = faces[i + j];
+            for (size_t i = 0; i < num_faces; i += 3) {
+                for (size_t j = 0; j < 3; j++) {
+                    size_t idx = faces[i + j];
                     vertex_processor.input_vertices(
                         Vector4f(vertices[3 * idx], vertices[3 * idx + 1], vertices[3 * idx + 2],
                                  1.0f),
@@ -136,4 +143,137 @@ void RasterizerRenderer::render(const Scene& scene)
 
     this->logger->info("rendering (single thread) takes {:.6f} seconds",
                        rendering_duration.count());
+
+    for (long unsigned int i = 0; i < Context::frame_buffer.depth_buffer.size(); i++) {
+        rendering_res.push_back(
+            static_cast<unsigned char>(Context::frame_buffer.color_buffer[i].x()));
+        rendering_res.push_back(
+            static_cast<unsigned char>(Context::frame_buffer.color_buffer[i].y()));
+        rendering_res.push_back(
+            static_cast<unsigned char>(Context::frame_buffer.color_buffer[i].z()));
+    }
+}
+
+void VertexProcessor::input_vertices(const Vector4f& positions, const Vector3f& normals)
+{
+    std::unique_lock<std::mutex> lock(queue_mutex);
+    VertexShaderPayload payload;
+    payload.world_position = positions;
+    payload.normal         = normals;
+    vertex_queue.push(payload);
+}
+
+//void VertexProcessor::worker_thread()
+//{
+//    const int SIZE = 8;
+//    int count = 0;
+//    int numberofver = 0;
+//    while (true) 
+//    {
+//        std ::vector<VertexShaderPayload> payloadlists;
+//        VertexShaderPayload payload;
+//        //相对于每次只取出一个VertexShaderPayload，采用list的新式一次取出多个
+//        {
+//            while (!vertex_queue.empty() && count < SIZE) 
+//            {
+//                std::unique_lock<std::mutex> lock(queue_mutex);
+//                payloadlists.push_back(vertex_queue.front());
+//                // typeof vertex_queue is VertexShaderPayload
+//                vertex_queue.pop();
+//                count++;
+//                numberofver++;
+//            }
+//            //通过这样的设计，可以让payloadlists中含有8个元素时，才继续进行后续的操作；
+//        }
+//        std::vector<std::promise<VertexShaderPayload>> promises(payloadlists.size());
+//        std::vector<std::future<VertexShaderPayload>> futures;
+//        for (auto& promise : promises) {
+//            futures.push_back(promise.get_future());
+//        }
+//        if (payload.world_position.w() == -1.0f) {
+//            Context::vertex_finish = true;
+//            /*std::cout << "VertexProcessor::worker_thread:return successfully" << std ::endl;
+//            std::cout << numberofver << std ::endl;*/
+//            // vertex_finish用于判断顶点着色器是否完成
+//            return;
+//        }
+//        std::vector<std::thread> threads;
+//        for (int i = 0; i < payloadlists.size(); i++) {
+//            threads.emplace_back([&, i] {
+//                VertexShaderPayload result = vertex_shader_ptr(payloadlists[i]);
+//                promises[i].set_value(result);
+//            });
+//        }
+//        for (int i = 0; i < futures.size(); i++)
+//        {
+//            std::unique_lock<std::mutex> lock(Context::vertex_queue_mutex);
+//            Context::vertex_shader_output_queue.push(futures[i].get());
+//            std::cout << " VertexProcessor::worker_thread:futures"<< std::endl;
+//        }
+//        for (auto& t : threads)
+//        {
+//            t.join();
+//        }
+//        count = 0;
+//    }
+//}
+void VertexProcessor::worker_thread()
+{
+    while (true) {
+        VertexShaderPayload payload;
+        {
+            if (vertex_queue.empty())
+                continue;
+            // typeof vertex_queue is VertexShaderPayload
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            if (vertex_queue.empty())
+                continue;
+            payload = vertex_queue.front();
+            vertex_queue.pop();
+            //numberofver++;
+            // 通过这样的设计，可以让payloadlists中含有8个元素时，才继续进行后续的操作；
+        }
+
+        if (payload.world_position.w() == -1.0f) {
+            Context::vertex_finish = true;
+            //std::cout << "VertexProcessor::worker_thread:return successfully" << std ::endl;
+            //std::cout << numberofver << std ::endl;
+            // vertex_finish用于判断顶点着色器是否完成
+            return;
+        }
+        VertexShaderPayload output_payload = vertex_shader_ptr(payload);
+        {
+            std::unique_lock<std::mutex> lock(Context::vertex_queue_mutex);
+            Context::vertex_shader_output_queue.push(output_payload);
+        }
+    }
+}
+void FragmentProcessor::worker_thread()
+{
+    while (true) {
+        FragmentShaderPayload fragment;
+        {
+            if (Context::rasterizer_finish && Context::rasterizer_output_queue.empty()) {
+                Context::fragment_finish = true;
+                return;
+            }
+            if (Context::rasterizer_output_queue.empty()) {
+                continue;
+            }
+            std::unique_lock<std::mutex> lock(Context::rasterizer_queue_mutex);
+            if (Context::rasterizer_output_queue.empty()) {
+                continue;
+            }
+            fragment = Context::rasterizer_output_queue.front();
+            Context::rasterizer_output_queue.pop();
+        }
+        int index = (Uniforms::height - 1 - fragment.y) * Uniforms::width + fragment.x;
+        if (fragment.depth > Context::frame_buffer.depth_buffer[index]) {
+            continue;
+            //depth越小，说明该片元越靠前，应该进行计算
+        }
+        fragment.color =
+            fragment_shader_ptr(fragment, Uniforms::material, Uniforms::lights, Uniforms::camera);
+        Context::frame_buffer.set_pixel(index, fragment.depth, fragment.color);
+    }
 }

@@ -22,6 +22,7 @@
 #include "../utils/kinetic_state.h"
 #include "../utils/logger.h"
 
+
 namespace fs = std::filesystem;
 using Eigen::Matrix4f;
 using Eigen::Vector3f;
@@ -55,26 +56,26 @@ void Scene::render_ground(const Shader& shader)
         // x axis
         vertices.append(0.0f, 0.0f, 0.0f); // x+ highlighted as a red line
         vertices.append(far_distance, 0.0f, 0.0f);
-        colors.append(RGB(226, 53, 79));
-        colors.append(RGB(226, 53, 79));
+        colors.append(RGB_COLOR(226, 53, 79));
+        colors.append(RGB_COLOR(226, 53, 79));
         vertices.append(0.0f, 0.0f, 0.0f); // x- rendered as a normal line;
         vertices.append(-far_distance, 0.0f, 0.0f);
-        colors.append(RGB(68, 68, 68));
-        colors.append(RGB(68, 68, 68));
+        colors.append(RGB_COLOR(68, 68, 68));
+        colors.append(RGB_COLOR(68, 68, 68));
         // y axis
         vertices.append(0.0f, 0.0f, 0.0f); // y+ highlighted as a green line
         vertices.append(0.0f, far_distance, 0.0f);
-        colors.append(RGB(131, 204, 6));
-        colors.append(RGB(131, 204, 6));
+        colors.append(RGB_COLOR(131, 204, 6));
+        colors.append(RGB_COLOR(131, 204, 6));
         // z axis
         vertices.append(0.0f, 0.0f, 0.0f); // z+ highlighted as a blue line
         vertices.append(0.0f, 0.0f, far_distance);
-        colors.append(RGB(43, 134, 232));
-        colors.append(RGB(43, 134, 232));
+        colors.append(RGB_COLOR(43, 134, 232));
+        colors.append(RGB_COLOR(43, 134, 232));
         vertices.append(0.0f, 0.0f, 0.0f); // z- rendered as a normal line
         vertices.append(0.0f, 0.0f, -far_distance);
-        colors.append(RGB(68, 68, 68));
-        colors.append(RGB(68, 68, 68));
+        colors.append(RGB_COLOR(68, 68, 68));
+        colors.append(RGB_COLOR(68, 68, 68));
         for (size_t i = 1; i <= n_baselines; i++) {
             vertices.append(-far_distance, 0.0f, -baseline_gap * i);
             vertices.append(far_distance, 0.0f, -baseline_gap * i);
@@ -85,7 +86,7 @@ void Scene::render_ground(const Shader& shader)
             vertices.append(baseline_gap * i, 0.0f, -far_distance);
             vertices.append(baseline_gap * i, 0.0f, far_distance);
             for (size_t j = 0; j < 8; j++) {
-                colors.append(RGB(68, 68, 68));
+                colors.append(RGB_COLOR(68, 68, 68));
             }
         }
         baselines.bind();
@@ -125,18 +126,18 @@ void Scene::render_camera(const Shader& shader)
         camera_vao.release();
         initialized = true;
     }
-    float far             = camera.far;
+    float far_plane       = camera.far_plane;
     float tan_half_fov_y  = std::tan(0.5f * radians(camera.fov_y_degrees));
-    float half_height     = camera.far * tan_half_fov_y;
+    float half_height     = camera.far_plane * tan_half_fov_y;
     float half_width      = half_height * camera.aspect_ratio;
     float target_distance = (camera.target - camera.position).norm();
     camera_vao.bind();
     camera_vertices.data.clear();
     camera_vertices.append(0.0f, 0.0f, 0.0f);
-    camera_vertices.append(-half_width, half_height, -far);
-    camera_vertices.append(half_width, half_height, -far);
-    camera_vertices.append(half_width, -half_height, -far);
-    camera_vertices.append(-half_width, -half_height, -far);
+    camera_vertices.append(-half_width, half_height, -far_plane);
+    camera_vertices.append(half_width, half_height, -far_plane);
+    camera_vertices.append(half_width, -half_height, -far_plane);
+    camera_vertices.append(-half_width, -half_height, -far_plane);
     camera_vertices.append(0.0f, 0.0f, -target_distance);
     camera_vertices.to_gpu();
     shader.set_uniform("model", (Matrix4f)(camera.view().inverse()));
@@ -298,9 +299,26 @@ void Scene::simulation_update()
 {
     // 这次模拟的总时长不是上一帧的时长，而是上一帧时长与之前帧剩余时长的总和，
     // 即上次调用 simulation_update 到现在过了多久。
+    // // 以固定的时间步长 (time_step)
+    // 循环模拟物体运动，每模拟一步，模拟总时长就减去一个 time_step
+    // ，当总时长不够一个 time_step 时停止模拟。
+    // 根据刚才模拟时间步的数量，更新最后一次调用 simulation_update 的时间
+    // (last_update)。
+    time_point t_now           = steady_clock::now();
+    duration frame_duration    = t_now - last_update;
+    duration remained_duration = frame_duration;
+    duration time_step_duration(time_step);
+    while (remained_duration > time_step_duration) 
+    {
+        for (auto& group:groups) {
+            for (auto& object:group->objects) {
 
-    // 以固定的时间步长 (time_step) 循环模拟物体运动，每模拟一步，模拟总时长就减去一个
-    // time_step ，当总时长不够一个 time_step 时停止模拟。
-
-    // 根据刚才模拟时间步的数量，更新最后一次调用 simulation_update 的时间 (last_update)。
+                object->update(all_objects);
+                last_update += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    std::chrono::duration<float>(time_step));
+            }
+        }
+        remained_duration = remained_duration - time_step_duration;
+    }
 }
+            
