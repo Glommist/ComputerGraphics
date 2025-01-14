@@ -1,5 +1,6 @@
 本项目为Xjtu-Graphics课程实验项目
 实验文档https://dandelion-docs.readthedocs.io/zh-cn
+原项目github：https://github.com/XJTU-Graphics/dandelion
 
 本实验我实现的部分如下：
 1. 基础部分：
