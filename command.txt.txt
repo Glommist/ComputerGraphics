@@ -1,0 +1,14 @@
+cmake --build . --config Release --target dandelion --parallel 8cmake -S .. -B .
+cmake --build . --config Release --target dandelion --parallel 8
+.\Release\dandelion.exe
+
+1.2 test
+Set-Location test
+New-Item -ItemType "directory" build
+Set-Location build
+cmake -S .. -B.
+cmake --build . --config Release --parallel 8
+./Release/test Transformation
+
+1.3 test
+./Release/test "Perspective Projection"
